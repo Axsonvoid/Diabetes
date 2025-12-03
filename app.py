@@ -1,11 +1,13 @@
 import streamlit as st
-import numpy as np
 import pandas as pd
+import numpy as np
 import pickle
+from sklearn.preprocessing import StandardScaler
+from sklearn.impute import SimpleImputer
 
-# ==========================
+# ========================================
 # LOAD MODEL
-# ==========================
+# ========================================
 with open("best_model.pkl", "rb") as f:
     data = pickle.load(f)
 
@@ -15,85 +17,102 @@ model_name = data["model_name"]
 st.title("🩺 Diabetes Risk Prediction App")
 st.write(f"Model yang digunakan: **{model_name}**")
 
-# ==========================
-# PREPROCESSING FUNCTION
-# (ekstrak dari notebook)
-# ==========================
-
-# Kolom yang digunakan untuk prediksi
+# ========================================
+# FITUR YANG DIGUNAKAN (Disederhanakan)
+# ========================================
 FEATURE_COLS = [
-    '_RFHYPE6','_RFCHOL3','_CHOLCH3','_BMI5','SMOKE100','CVDSTRK3','_MICHD',
-    'EXERANY2','PRIMINS1','MEDCOST1','GENHLTH','MENTHLTH','PHYSHLTH',
-    'DIFFWALK','_SEX','_AGEG5YR','_EDUCAG','_INCOMG1'
+    "_RFHYPE6",   # Hypertension
+    "_RFCHOL3",   # High Cholesterol
+    "_BMI5",      # BMI × 10
+    "GENHLTH",    # General Health
+    "_AGEG5YR",   # Age group
+    "MENTHLTH",   # Mental unhealthy days
+    "PHYSHLTH"    # Physical unhealthy days
 ]
 
-# Imputer sederhana untuk data baru
-from sklearn.impute import SimpleImputer
-num_imputer = SimpleImputer(strategy='median')
-cat_imputer = SimpleImputer(strategy='most_frequent')
+NUM_COLS = ["_BMI5", "MENTHLTH", "PHYSHLTH"]
+CAT_COLS = ["_RFHYPE6", "_RFCHOL3", "GENHLTH", "_AGEG5YR"]
 
-# Untuk kolom numeric terpenting (dari notebook)
-NUM_COLS = ['_BMI5','MENTHLTH','PHYSHLTH']
-CAT_COLS = [col for col in FEATURE_COLS if col not in NUM_COLS]
-
-# Standard scaler dari model training tidak disimpan → buat baru & fit nilai wajar
-# NOTE: Untuk aplikasi sebenarnya scaler harus disimpan.
-# Jika tidak ada, kita perkirakan distribusi standar saja.
-from sklearn.preprocessing import StandardScaler
+num_imputer = SimpleImputer(strategy="median")
+cat_imputer = SimpleImputer(strategy="most_frequent")
 scaler = StandardScaler()
 
 
-def preprocess_input(df):
-    # Isi missing values
+def preprocess(df):
     df[NUM_COLS] = num_imputer.fit_transform(df[NUM_COLS])
     df[CAT_COLS] = cat_imputer.fit_transform(df[CAT_COLS])
-
-    # Standarisasi kolom numeric
     df[NUM_COLS] = scaler.fit_transform(df[NUM_COLS])
-
     return df
 
 
-# ==========================
-# FORM INPUT
-# ==========================
+# ========================================
+# INPUT FORM
+# ========================================
+st.subheader("Masukkan Data Anda")
 
-st.subheader("Masukkan Indikator Kesehatan")
+col1, col2 = st.columns(2)
 
-user_input = {}
+with col1:
+    hypertension = st.selectbox(
+        "Pernah didiagnosis hipertensi?", [0, 1],
+        help="1 = Ya, 0 = Tidak"
+    )
+    cholesterol = st.selectbox(
+        "Kolesterol Tinggi?", [0, 1],
+        help="1 = Ya, 0 = Tidak"
+    )
+    bmi = st.number_input(
+        "BMI Anda",
+        min_value=10.0, max_value=60.0, step=0.1,
+        help="Masukkan BMI normal (18–40). Sistem akan mengubah ke format _BMI5"
+    )
 
-for col in FEATURE_COLS:
-    if col in NUM_COLS:
-        user_input[col] = st.number_input(f"{col}", min_value=0.0, max_value=1000.0, step=1.0)
-    else:
-        user_input[col] = st.selectbox(
-            f"{col}", 
-            options=[0, 1, 2, 3, 4, 5, 6], 
-            help="Gunakan nilai asli sesuai dataset (0-6 / 1-5 / kategorikal)"
-        )
+with col2:
+    genhlth = st.selectbox(
+        "Seberapa sehat kondisi umum Anda?",
+        [1, 2, 3, 4, 5],
+        help="1=Excellent, 5=Poor"
+    )
+    age_group = st.selectbox(
+        "Kelompok Usia",
+        options=list(range(1, 14)),
+        help="1 = 18–24, 2 = 25–29, ..., 13 = 80+"
+    )
+    menthlth = st.slider(
+        "Hari kesehatan mental buruk (0–30)", 0, 30, 0
+    )
+    physhlth = st.slider(
+        "Hari kesehatan fisik buruk (0–30)", 0, 30, 0
+    )
 
-# Convert ke dataframe
-df_input = pd.DataFrame([user_input])
+# Convert BMI → dataset format (×10)
+bmi_scaled = bmi * 10
 
-# ==========================
+# Create dataframe
+input_df = pd.DataFrame([{
+    "_RFHYPE6": hypertension,
+    "_RFCHOL3": cholesterol,
+    "_BMI5": bmi_scaled,
+    "GENHLTH": genhlth,
+    "_AGEG5YR": age_group,
+    "MENTHLTH": menthlth,
+    "PHYSHLTH": physhlth
+}])
+
+# ========================================
 # PREDICTION
-# ==========================
-
+# ========================================
 if st.button("Prediksi Risiko Diabetes"):
-    processed = preprocess_input(df_input.copy())
+    processed = preprocess(input_df.copy())
     prob = model.predict_proba(processed)[0][1]
-    prediction = model.predict(processed)[0]
+    pred = model.predict(processed)[0]
 
     st.markdown("---")
     st.write("### 🔍 Hasil Prediksi")
 
-    if prediction == 1:
-        st.error(f"**HASIL: Potensi Diabetes Tinggi**")
+    if pred == 1:
+        st.error("**Hasil: Risiko Diabetes Tinggi**")
     else:
-        st.success(f"**HASIL: Potensi Diabetes Rendah**")
+        st.success("**Hasil: Risiko Diabetes Rendah**")
 
     st.write(f"**Probabilitas: {prob:.3f}**")
-
-
-st.markdown("---")
-st.caption("Developed by William – IS388 Final Project")
